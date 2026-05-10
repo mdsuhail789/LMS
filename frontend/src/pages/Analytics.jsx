@@ -124,7 +124,7 @@ export function Analytics() {
           <h2 className="mb-6 font-display text-xl text-slate-900">Subject Breakdown</h2>
           <ul className="space-y-5">
             {data.subjects.map((s) => (
-              <li key={s.name}>
+              <li key={s.course_id}>
                 <div className="mb-1.5 flex justify-between text-sm">
                   <span className="font-medium text-slate-800">{s.name}</span>
                   <span className="text-slate-500">{s.percent}%</span>
@@ -154,7 +154,7 @@ export function Analytics() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {data.performance.map((row) => (
-                  <tr key={row.course} className="hover:bg-slate-50/80">
+                  <tr key={row.course_id} className="hover:bg-slate-50/80">
                     <td className="py-4 pr-4 font-medium text-slate-900">{row.course}</td>
                     <td className={`py-4 pr-4 font-semibold ${scoreTone[row.score_tone] || "text-slate-700"}`}>
                       {row.last_score}

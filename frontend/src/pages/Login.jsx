@@ -93,9 +93,6 @@ export function Login() {
             Create an account
           </Link>
         </p>
-        <p className="mt-6 text-center text-xs text-slate-400">
-          Demo: seed the database, then use <span className="font-mono text-slate-600">alex@learnflow.demo</span>
-        </p>
       </div>
     </div>
   );

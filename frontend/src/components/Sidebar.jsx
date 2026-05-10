@@ -81,11 +81,9 @@ export function Sidebar() {
 
       <div className="mt-auto border-t border-slate-700/80 p-4">
         <div className="flex items-center gap-3 rounded-xl bg-slate-800/60 px-3 py-3">
-          <img
-            src={user?.avatar_url || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=96"}
-            alt=""
-            className="h-10 w-10 rounded-full object-cover ring-2 ring-slate-600"
-          />
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-700 text-lg font-bold text-white ring-2 ring-slate-600">
+            {(user?.full_name || "Learner").charAt(0).toUpperCase()}
+          </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-white">{user?.full_name || "Learner"}</p>
             <p className="truncate text-xs text-slate-400">{user?.tier_label || "Learner"}</p>

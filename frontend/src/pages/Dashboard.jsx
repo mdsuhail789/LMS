@@ -317,6 +317,15 @@ export function Dashboard() {
                 <Tooltip
                   cursor={{ fill: "#f1f5f9" }}
                   contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0" }}
+                  formatter={(value) => {
+                    if (!value) return ["0 minute", "Study Time"];
+                    const h = Math.floor(value);
+                    const m = Math.round((value - h) * 60);
+                    let fmt = "";
+                    if (h > 0) fmt += `${h} hour `;
+                    if (m > 0) fmt += `${m} minute`;
+                    return [fmt.trim(), "Study Time"];
+                  }}
                 />
                 <Bar dataKey="hours" radius={[6, 6, 0, 0]} maxBarSize={40}>
                   {chartData.map((entry, index) => (

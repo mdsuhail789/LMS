@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from enum import Enum
 
-from pydantic import AnyUrl, BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class TaskStatus(str, Enum):
@@ -14,6 +14,7 @@ class TaskCreate(BaseModel):
     description: str = Field(default="", max_length=3000)
     deadline: date
     duration_minutes: int | None = Field(default=None, ge=5, le=24 * 60)
+    video_url: str | None = None
     status: TaskStatus = TaskStatus.PENDING
 
 
@@ -22,6 +23,7 @@ class TaskUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=3000)
     deadline: date | None = None
     duration_minutes: int | None = Field(default=None, ge=5, le=24 * 60)
+    video_url: str | None = None
     status: TaskStatus | None = None
 
 
@@ -35,4 +37,5 @@ class TaskOut(BaseModel):
     deadline_date: str | None = None
     duration_minutes: int | None = None
     status: TaskStatus
+    video_url: str | None = None
     created_at: datetime

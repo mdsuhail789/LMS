@@ -41,12 +41,20 @@ def _extract_json_object(text: str) -> dict | None:
     return None
 
 
+def _friendly_ai_generation_message(error: Exception) -> str:
+    text = str(error).strip()
+    upper = text.upper()
+    if "429" in text or "RESOURCE_EXHAUSTED" in upper or "RATE LIMIT" in upper:
+        return "AI is busy right now, so we could not generate new study tasks. Please try again in a little while."
+    return "AI could not generate new study tasks right now. Please try again shortly."
+
+
 def _weekday_name(d: date) -> str:
     return d.strftime("%A")
 
 
 def _safe_header_date(d: date) -> str:
-    return f"{d.strftime('%A')}, {d.strftime('%B')} {d.day}"
+    return f"{d.strftime('%B')} {d.day}"
 
 
 async def _get_user(user_id: str) -> dict:
@@ -75,13 +83,12 @@ async def dashboard(user_id: str) -> dict:
     if role == "admin":
         courses = await db.courses.find({"owner_id": user_id}).to_list(length=None)
     else:
-        all_users = await db.users.find({}, {"_id": 1, "role": 1}).to_list(length=None)
-        admin_users = [u for u in all_users if str(u.get("role", "")).strip().lower() == "admin"]
+        admin_users = await db.users.find({"role": {"$regex": "^admin$", "$options": "i"}}, {"_id": 1}).to_list(length=None)
         admin_ids = [str(u["_id"]) for u in admin_users]
         owner_filter = {"owner_id": {"$in": admin_ids}} if admin_ids else {"owner_id": {"$in": []}}
         courses = await db.courses.find(owner_filter).to_list(length=None)
     total_courses = len(courses)
-    total_tasks = await db.tasks.count_documents({"user_id": user_id})
+    total_tasks = await db.tasks.count_documents({"user_id": user_id, "$or": [{"is_deleted": {"$ne": True}}, {"status": TaskStatus.COMPLETED.value}]})
     completed_tasks = await db.tasks.count_documents(
         {"user_id": user_id, "status": TaskStatus.COMPLETED.value}
     )
@@ -103,7 +110,17 @@ async def dashboard(user_id: str) -> dict:
         if delta >= 0:
             streak_dates.add(dt)
             
-    weekly_total = round(weekly_mins / 60.0, 1)
+    weekly_total = round(weekly_mins / 60.0, 2)
+    wh = weekly_mins // 60
+    wm = weekly_mins % 60
+    if wh > 0 and wm > 0:
+        weekly_fmt = f"{wh} hour {wm} minute"
+    elif wh > 0:
+        weekly_fmt = f"{wh} hour"
+    elif wm > 0:
+        weekly_fmt = f"{wm} minute"
+    else:
+        weekly_fmt = "0 hour"
     
     # Simple consecutive streak calculation
     streak = 0
@@ -125,7 +142,7 @@ async def dashboard(user_id: str) -> dict:
         },
         {
             "label": "Study Hours",
-            "value": f"{weekly_total} hrs this week",
+            "value": f"{weekly_fmt} this week",
             "sublabel": None,
             "icon": "clock",
             "variant": "default",
@@ -146,14 +163,24 @@ async def dashboard(user_id: str) -> dict:
         },
     ]
 
+    course_ids = [str(c["_id"]) for c in courses[:8]]
+    if role == "admin":
+        all_prog_docs = await db.course_progress.find({"course_id": {"$in": course_ids}}).to_list(length=None)
+    else:
+        all_prog_docs = await db.course_progress.find({"course_id": {"$in": course_ids}, "user_id": user_id}).to_list(length=None)
+    
+    prog_by_course = {cid: [] for cid in course_ids}
+    for p in all_prog_docs:
+        prog_by_course[str(p["course_id"])].append(p)
+
     course_progress = []
     for i, c in enumerate(courses[:8]):
         cid = str(c["_id"])
+        prog_docs = prog_by_course.get(cid, [])
         if role == "admin":
-            prog_docs = await db.course_progress.find({"course_id": cid}).to_list(length=None)
             pct = (sum(float(d.get("progress_percent") or 0.0) for d in prog_docs) / len(prog_docs)) if prog_docs else float(c.get("progress_override") or 0)
         else:
-            prog_doc = await db.course_progress.find_one({"course_id": cid, "user_id": user_id})
+            prog_doc = prog_docs[0] if prog_docs else {}
             pct = float((prog_doc or {}).get("progress_percent") or c.get("progress_override") or 0.0)
         theme = c.get("theme_color") or _theme_cycle(i)
         course_progress.append(
@@ -168,12 +195,14 @@ async def dashboard(user_id: str) -> dict:
     # Dynamic Today's Plan (prefer active/upcoming tasks; avoid stale completed rows)
     today_plan = []
     today_start = datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc)
+    tomorrow_start = today_start + timedelta(days=1)
     active_q = {
         "user_id": user_id,
         "status": TaskStatus.PENDING.value,
+        "is_deleted": {"$ne": True},
         "$or": [
-            {"deadline_date": {"$gte": today.isoformat()}},
-            {"deadline": {"$gte": today_start}},
+            {"deadline_date": today.isoformat()},
+            {"deadline": {"$gte": today_start, "$lt": tomorrow_start}},
         ],
     }
     db_today_tasks = await db.tasks.find(active_q).sort([("deadline_date", 1), ("deadline", 1), ("title", 1)]).limit(4).to_list(length=4)
@@ -209,7 +238,15 @@ async def dashboard(user_id: str) -> dict:
     # Always compute deadlines from real pending tasks.
     # Avoid stale/static values from old seeded profile fields.
     tasks = (
-        await db.tasks.find({"user_id": user_id, "status": TaskStatus.PENDING.value})
+        await db.tasks.find({
+            "user_id": user_id, 
+            "status": TaskStatus.PENDING.value, 
+            "is_deleted": {"$ne": True},
+            "$or": [
+                {"deadline_date": {"$gte": today.isoformat()}},
+                {"deadline": {"$gte": today_start}},
+            ]
+        })
         .sort([("deadline_date", 1), ("deadline", 1), ("title", 1)])
         .limit(10)
         .to_list(length=10)
@@ -220,7 +257,7 @@ async def dashboard(user_id: str) -> dict:
         if not dl:
             continue
         delta = (dl - today).days
-        if delta <= 0:
+        if delta == 0:
             urg, label = "today", "Today"
         elif delta <= 2:
             urg, label = "soon", f"{delta} days"
@@ -247,11 +284,11 @@ async def dashboard(user_id: str) -> dict:
             wd = dt_val.weekday()
             mins = int(t.get("duration_minutes") or 120)
             weekly[wd] += (mins / 60.0)
-    weekly = [round(w, 1) for w in weekly]
+    weekly = [round(w, 2) for w in weekly]
     
     first = user.get("full_name", "Learner").split()[0]
     pending = await db.tasks.count_documents(
-        {"user_id": user_id, "status": TaskStatus.PENDING.value}
+        {"user_id": user_id, "status": TaskStatus.PENDING.value, "is_deleted": {"$ne": True}}
     )
 
     return {
@@ -263,7 +300,7 @@ async def dashboard(user_id: str) -> dict:
         "today_plan": today_plan,
         "deadlines": deadlines[:3],
         "weekly_hours": weekly,
-        "weekly_hours_label": f"This Week: {weekly_total} hrs",
+        "weekly_hours_label": f"This Week: {weekly_fmt}",
     }
 
 
@@ -280,7 +317,7 @@ async def analytics(user_id: str, period: str) -> dict:
     start_date = None if period == "all" else today - timedelta(days=days_in_period)
 
     # Fetch all tasks for user
-    tasks = await db.tasks.find({"user_id": user_id}).to_list(length=None)
+    tasks = await db.tasks.find({"user_id": user_id, "$or": [{"is_deleted": {"$ne": True}}, {"status": TaskStatus.COMPLETED.value}]}).to_list(length=None)
 
     # Process Tasks
     period_tasks = []
@@ -340,12 +377,21 @@ async def analytics(user_id: str, period: str) -> dict:
     if role == "admin":
         courses = await db.courses.find({"owner_id": user_id}).to_list(length=None)
     else:
-        all_users = await db.users.find({}, {"_id": 1, "role": 1}).to_list(length=None)
-        admin_users = [u for u in all_users if str(u.get("role", "")).strip().lower() == "admin"]
+        admin_users = await db.users.find({"role": {"$regex": "^admin$", "$options": "i"}}, {"_id": 1}).to_list(length=None)
         admin_ids = [str(u["_id"]) for u in admin_users]
         owner_filter = {"owner_id": {"$in": admin_ids}} if admin_ids else {"owner_id": {"$in": []}}
         courses = await db.courses.find(owner_filter).to_list(length=None)
     course_map = {str(c["_id"]): c for c in courses}
+
+    course_ids = [str(c["_id"]) for c in courses]
+    if role == "admin":
+        all_prog_docs = await db.course_progress.find({"course_id": {"$in": course_ids}}).to_list(length=None)
+    else:
+        all_prog_docs = await db.course_progress.find({"course_id": {"$in": course_ids}, "user_id": user_id}).to_list(length=None)
+    
+    prog_by_course = {cid: [] for cid in course_ids}
+    for p in all_prog_docs:
+        prog_by_course[str(p["course_id"])].append(p)
 
     subjects = []
     for c in courses:
@@ -353,13 +399,14 @@ async def analytics(user_id: str, period: str) -> dict:
         c_tasks = [t for t in tasks if t.get("course_id") == cid]
         course_task_count = len(c_tasks)
         done = sum(1 for t in c_tasks if t.get("status") == TaskStatus.COMPLETED.value)
+        prog_docs = prog_by_course.get(cid, [])
         if role == "admin":
-            prog_docs = await db.course_progress.find({"course_id": cid}).to_list(length=None)
             pct = (sum(float(d.get("progress_percent") or 0.0) for d in prog_docs) / len(prog_docs)) if prog_docs else float(c.get("progress_override") or 0)
         else:
-            prog_doc = await db.course_progress.find_one({"course_id": cid, "user_id": user_id})
+            prog_doc = prog_docs[0] if prog_docs else {}
             pct = float((prog_doc or {}).get("progress_percent") or c.get("progress_override") or 0.0)
         subjects.append({
+            "course_id": cid,
             "name": c.get("title", "Unknown"),
             "percent": round(pct),
             "theme": c.get("theme_color") or "blue"
@@ -367,7 +414,7 @@ async def analytics(user_id: str, period: str) -> dict:
 
     subjects = sorted(subjects, key=lambda x: x["percent"], reverse=True)[:4]
     if not subjects:
-        subjects = [{"name": "No courses found", "percent": 0, "theme": "neutral"}]
+        subjects = [{"course_id": "no-courses", "name": "No courses found", "percent": 0, "theme": "neutral"}]
 
     # Performance
     performance = []
@@ -378,11 +425,11 @@ async def analytics(user_id: str, period: str) -> dict:
         
         course_task_count = len(c_tasks)
         done = len(completed_c_tasks)
+        prog_docs = prog_by_course.get(cid, [])
         if role == "admin":
-            prog_docs = await db.course_progress.find({"course_id": cid}).to_list(length=None)
             pct = (sum(float(d.get("progress_percent") or 0.0) for d in prog_docs) / len(prog_docs)) if prog_docs else float(c.get("progress_override") or 0)
         else:
-            prog_doc = await db.course_progress.find_one({"course_id": cid, "user_id": user_id})
+            prog_doc = prog_docs[0] if prog_docs else {}
             pct = float((prog_doc or {}).get("progress_percent") or c.get("progress_override") or 0.0)
 
         has_overdue = False
@@ -403,6 +450,7 @@ async def analytics(user_id: str, period: str) -> dict:
             score_tone = "success" if pct >= 70 else "warning"
 
         performance.append({
+             "course_id": cid,
              "course": c.get("title", "Course"),
              "last_score": f"{len(completed_c_tasks)} / {len(c_tasks)} tasks",
              "score_tone": score_tone,
@@ -415,6 +463,7 @@ async def analytics(user_id: str, period: str) -> dict:
 
     if not performance:
         performance = [{
+            "course_id": "no-courses",
             "course": "No courses created yet",
             "last_score": "-",
             "score_tone": "neutral",
@@ -472,6 +521,7 @@ def _date_range_to_task_query(
     end_dt = datetime.combine(end_exclusive, datetime.min.time(), tzinfo=timezone.utc)
     q = {
         "user_id": user_id,
+        "is_deleted": {"$ne": True},
         "$or": [
             {"deadline_date": {"$gte": start_s, "$lt": end_s}},
             {"deadline": {"$gte": start_dt, "$lt": end_dt}},
@@ -506,10 +556,7 @@ def _tasks_to_planner_blocks(
         dl = _task_deadline_as_date(t.get("deadline"))
         dl_str = dl.strftime("%a %b %d") if dl else ""
         desc = (t.get("description") or "").strip()
-        if desc:
-            sub = f"{dl_str} · {desc[:40]}" if dl_str else desc[:50]
-        else:
-            sub = dl_str or "Task"
+        sub = desc[:50] if desc else "Task"
         dur = int(t.get("duration_minutes") or 120)
         hour = 8 + (i % 6) * 2
         ampm = "AM" if hour < 12 else "PM"
@@ -522,6 +569,7 @@ def _tasks_to_planner_blocks(
                 "time": f"{hour_12}:00 {ampm}",
                 "title": t.get("title", "Task"),
                 "subtitle": sub,
+                "deadline_label": dl_str or None,
                 "duration_minutes": dur,
                 "duration_label": f"{dur//60} hrs" if dur >= 60 and dur % 60 == 0 else (f"{dur} min" if dur < 60 else f"{dur//60}h {dur%60}m"),
                 "status": st,
@@ -584,15 +632,13 @@ def _compose_day_blocks_from_tasks_and_saved(
             dl = _task_deadline_as_date(t.get("deadline"))
             dl_str = dl.strftime("%a %b %d") if dl else ""
             desc = (t.get("description") or "").strip()
-            if desc:
-                sub = f"{dl_str} · {desc[:40]}" if dl_str else desc[:50]
-            else:
-                sub = dl_str or sb.get("subtitle", "Task")
+            sub = desc[:50] if desc else sb.get("subtitle", "Task")
             out.append(
                 {
                     **sb,
                     "title": t.get("title", sb.get("title", "Task")),
                     "subtitle": sub,
+                    "deadline_label": dl_str or None,
                     "status": st,
                     "duration_minutes": int(t.get("duration_minutes") or sb.get("duration_minutes") or 120),
                     "duration_label": sb.get("duration_label")
@@ -613,25 +659,23 @@ def _compose_day_blocks_from_tasks_and_saved(
         tid = str(t["_id"])
         if tid in seen:
             continue
-            
+
         dur = int(t.get("duration_minutes") or 120)
         dur_label = f"{dur//60} hrs" if dur >= 60 and dur % 60 == 0 else (f"{dur} min" if dur < 60 else f"{dur//60}h {dur%60}m")
-        
         dl = _task_deadline_as_date(t.get("deadline"))
         dl_str = dl.strftime("%a %b %d") if dl else ""
         desc = (t.get("description") or "").strip()
-        sub = f"{dl_str} · {desc[:40]}" if dl_str else desc[:50]
-        if not desc:
-            sub = dl_str or "Task"
-            
+        sub = desc[:50] if desc else "Task"
+
         out.append({
             "id": tid,
             "time": "TBD",
             "title": t.get("title", "Task"),
             "subtitle": sub,
+            "deadline_label": dl_str or None,
             "duration_minutes": dur,
             "duration_label": dur_label,
-            "status": "pending",
+            "status": "done" if t.get("status") == TaskStatus.COMPLETED.value else "pending",
         })
 
     if not out:
@@ -644,7 +688,6 @@ def _compose_day_blocks_from_tasks_and_saved(
             b["status"] = "pending"
     _apply_first_pending_highlight(out)
     return out
-
 
 def _build_calendar(year: int, month: int, today: date, deadline_days: set[int]) -> list[dict]:
     cal = calendar.Calendar(firstweekday=calendar.MONDAY)
@@ -835,16 +878,6 @@ async def save_planner_blocks(user_id: str, day: date, blocks: list[dict]) -> di
     return {"ok": True}
 
 
-async def clear_planner_blocks_for_day(user_id: str, ref: date | None) -> dict:
-    await _get_user(user_id)
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not connected")
-    d = ref or date.today()
-    await db.planner_blocks.delete_one({"user_id": user_id, "day": d.isoformat()})
-    return {"ok": True, "cleared_day": d.isoformat()}
-
-
 def _minutes_to_label(minutes: int) -> str:
     m = max(5, int(minutes))
     if m < 60:
@@ -945,8 +978,10 @@ async def auto_schedule_day(user_id: str, ref: date | None) -> dict:
         done = t.get("status") == TaskStatus.COMPLETED.value
         st = "done" if done else ("now" if tid == first_pending else "pending")
         ct = course_title_by_id.get(t.get("course_id"), "Course")
+        dl = _task_deadline_as_date(t.get("deadline"))
+        dl_str = dl.strftime("%a %b %d") if dl else ""
         desc = (t.get("description") or "").strip()
-        sub = f"{ct} · {desc[:60]}" if desc else ct
+        sub = f"{ct} - {desc[:60]}" if desc else ct
         dur = int(t.get("_slot_dur") or t.get("duration_minutes") or 120)
         blocks.append(
             {
@@ -954,12 +989,12 @@ async def auto_schedule_day(user_id: str, ref: date | None) -> dict:
                 "time": t.get("_slot_time") or "08:00",
                 "title": t.get("title", "Task"),
                 "subtitle": sub,
+                "deadline_label": dl_str or None,
                 "duration_minutes": dur,
                 "duration_label": _minutes_to_label(dur),
                 "status": st,
             }
         )
-
     await db.planner_blocks.update_one(
         {"user_id": user_id, "day": day.isoformat()},
         {"$set": {"user_id": user_id, "day": day.isoformat(), "blocks": blocks}},
@@ -1101,14 +1136,17 @@ async def apply_ai_recommendation(user_id: str, ref: date | None) -> dict:
             traceback.print_exc()
             # Safety: never block scheduling due to Gemini issues.
             suggested_docs = []
-            ai_message = f"AI could not generate tasks due to an error: {str(e)[:50]}..."
+            ai_message = _friendly_ai_generation_message(e)
         
     if suggested_docs:
         await db.tasks.insert_many(suggested_docs)
         
     if ai_message:
         from bson import ObjectId
-        ai_message_display = ai_message + " Tasks generated successfully! Click 'Auto-Schedule' above to place them on your timeline."
+        if suggested_docs:
+            ai_message_display = ai_message + " Tasks generated successfully. Click 'Auto-Schedule' above to place them on your timeline."
+        else:
+            ai_message_display = ai_message
         await db.users.update_one(
             {"_id": ObjectId(user_id)},
             {"$set": {"learnflow.ai_recommendation": ai_message_display}}
@@ -1129,8 +1167,7 @@ async def courses_catalog(current_user: dict, status_filter: str) -> dict:
     if role == "admin":
         owner_filter: dict = {"owner_id": user_id}
     else:
-        all_users = await db.users.find({}, {"_id": 1, "role": 1}).to_list(length=None)
-        admin_users = [u for u in all_users if str(u.get("role", "")).strip().lower() == "admin"]
+        admin_users = await db.users.find({"role": {"$regex": "^admin$", "$options": "i"}}, {"_id": 1}).to_list(length=None)
         admin_ids = [str(u["_id"]) for u in admin_users]
         owner_filter = {"owner_id": {"$in": admin_ids}} if admin_ids else {"owner_id": {"$in": []}}
 
@@ -1165,6 +1202,25 @@ async def courses_catalog(current_user: dict, status_filter: str) -> dict:
 
             completed_names = [users_by_id.get(p.get("user_id"), "Learner") for p in completed_docs][:3]
             in_progress_names = [users_by_id.get(p.get("user_id"), "Learner") for p in in_progress_docs][:3]
+            learner_progress = []
+            for p in progress_docs:
+                learner_progress.append(
+                    {
+                        "user_id": str(p.get("user_id") or ""),
+                        "full_name": users_by_id.get(p.get("user_id"), "Learner"),
+                        "status": "completed"
+                        if p.get("status") == "completed" or float(p.get("progress_percent") or 0.0) >= 100
+                        else "in_progress",
+                        "progress_percent": round(float(p.get("progress_percent") or 0.0), 1),
+                    }
+                )
+            learner_progress.sort(
+                key=lambda item: (
+                    0 if item["status"] == "in_progress" else 1,
+                    -item["progress_percent"],
+                    item["full_name"].lower(),
+                )
+            )
             pct = round((len(completed_docs) / len(progress_docs) * 100.0), 1) if progress_docs else 0.0
             st = "completed" if completed_docs and not in_progress_docs else "in_progress"
         else:
@@ -1188,6 +1244,7 @@ async def courses_catalog(current_user: dict, status_filter: str) -> dict:
 
             completed_names = []
             in_progress_names = []
+            learner_progress = []
 
         cat_theme = c.get("category_theme") or "blue"
         cta_theme = c.get("cta_theme") or cat_theme
@@ -1213,6 +1270,7 @@ async def courses_catalog(current_user: dict, status_filter: str) -> dict:
                 "learner_in_progress_count": len(in_progress_docs) if role == "admin" else 0,
                 "learner_completed_names": completed_names,
                 "learner_in_progress_names": in_progress_names,
+                "learner_progress": learner_progress,
             }
         )
 
@@ -1420,8 +1478,7 @@ async def course_detail(current_user: dict, course_id: str) -> dict:
     if role == "admin":
         course_query: dict = {"_id": oid, "owner_id": user_id}
     else:
-        all_users = await db.users.find({}, {"_id": 1, "role": 1}).to_list(length=None)
-        admin_users = [u for u in all_users if str(u.get("role", "")).strip().lower() == "admin"]
+        admin_users = await db.users.find({"role": {"$regex": "^admin$", "$options": "i"}}, {"_id": 1}).to_list(length=None)
         admin_ids = [str(u["_id"]) for u in admin_users]
         course_query = {"_id": oid, "owner_id": {"$in": admin_ids}}
 
@@ -1472,8 +1529,7 @@ async def record_watch_progress(
     if role == "admin":
         course_query: dict = {"_id": oid, "owner_id": user_id}
     else:
-        all_users = await db.users.find({}, {"_id": 1, "role": 1}).to_list(length=None)
-        admin_users = [u for u in all_users if str(u.get("role", "")).strip().lower() == "admin"]
+        admin_users = await db.users.find({"role": {"$regex": "^admin$", "$options": "i"}}, {"_id": 1}).to_list(length=None)
         admin_ids = [str(u["_id"]) for u in admin_users]
         course_query = {"_id": oid, "owner_id": {"$in": admin_ids}}
 
@@ -1531,3 +1587,4 @@ async def record_watch_progress(
         "status": st,
         "resume_seconds": max(0, new_resume),
     }
+

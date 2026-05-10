@@ -25,7 +25,18 @@ export async function api(path, options = {}) {
   }
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(path, { ...options, headers });
+  let res;
+  try {
+    res = await fetch(path, { ...options, headers });
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : "Network request failed";
+    throw new Error(
+      `Cannot reach the API server. Make sure the frontend dev server and FastAPI backend are running. (${message})`,
+    );
+  }
 
   if (res.status === 401) {
     clearToken();

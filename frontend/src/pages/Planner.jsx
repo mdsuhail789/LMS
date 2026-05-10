@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Sparkles, Trash2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
@@ -41,6 +41,37 @@ function addCalendarMonths(date, delta) {
   return new Date(y, m, day);
 }
 
+function getPlannerAiState(message) {
+  const raw = typeof message === "string" ? message.trim() : "";
+  const fallback = {
+    tone: "normal",
+    text: "Generate a few AI study tasks, then use Auto-Schedule to place them on your timeline.",
+    ctaLabel: "Generate AI Tasks",
+  };
+
+  if (!raw) return fallback;
+
+  const upper = raw.toUpperCase();
+  if (
+    upper.includes("RESOURCE_EXHAUSTED") ||
+    upper.includes("RATE LIMIT") ||
+    raw.includes("429") ||
+    upper.includes("COULD NOT GENERATE")
+  ) {
+    return {
+      tone: "error",
+      text: "AI suggestions are temporarily unavailable. Please try again in a little while.",
+      ctaLabel: "Try Again Later",
+    };
+  }
+
+  return {
+    tone: "normal",
+    text: raw,
+    ctaLabel: upper.includes("TASKS GENERATED SUCCESSFULLY") ? "Generate More Tasks" : "Generate AI Tasks",
+  };
+}
+
 export function Planner() {
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -56,6 +87,7 @@ export function Planner() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [showAddTask, setShowAddTask] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
 
   // Persist current planner state in the URL so refresh/share keeps it.
   useEffect(() => {
@@ -110,6 +142,10 @@ export function Planner() {
   const calendarDays = data?.calendar?.days || data.calendar_days || [];
   const calendarTitle = data?.calendar?.title || data.calendar_title || "";
   const calendarWeekdayLabels = data?.calendar?.weekday_labels || data.calendar_weekday_labels || [];
+  const aiState = getPlannerAiState(data.ai_recommendation);
+  const aiCardText = aiLoading
+    ? "AI is preparing task suggestions for your selected day. Please wait a moment."
+    : aiState.text;
 
   const weeks = [];
   for (let i = 0; i < calendarDays.length; i += 7) {
@@ -203,27 +239,37 @@ export function Planner() {
             </div>
           </section>
 
-          <section className="rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-5 text-white shadow-xl shadow-blue-600/20">
-            <div className="mb-3 flex items-center gap-2 text-blue-100">
+          <section
+            className={`rounded-2xl p-5 text-white shadow-xl ${
+              aiState.tone === "error"
+                ? "bg-gradient-to-br from-amber-500 to-orange-500 shadow-orange-500/20"
+                : "bg-gradient-to-br from-blue-600 to-blue-700 shadow-blue-600/20"
+            }`}
+          >
+            <div className={`mb-3 flex items-center gap-2 ${aiState.tone === "error" ? "text-orange-50" : "text-blue-100"}`}>
               <Sparkles className="h-5 w-5" />
               <span className="text-sm font-semibold uppercase tracking-wide">AI recommendation</span>
             </div>
-            <p className="text-sm leading-relaxed text-blue-50">{data.ai_recommendation}</p>
+            <p className={`text-sm leading-relaxed ${aiState.tone === "error" ? "text-orange-50" : "text-blue-50"}`}>{aiCardText}</p>
             <button
               type="button"
               onClick={async () => {
+                setAiLoading(true);
                 try {
                   const qs = new URLSearchParams({ day: toISODate(selectedDay) });
                   const d = await api(`/api/learnflow/planner/apply-recommendation?${qs.toString()}`, { method: "POST" });
                   setData(d);
                 } catch (e) {
                   alert(e instanceof Error ? e.message : "Could not update schedule");
+                } finally {
+                  setAiLoading(false);
                 }
               }}
-              className="mt-4 flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2.5 text-sm font-semibold backdrop-blur hover:bg-white/25 transition-colors"
+              disabled={aiLoading}
+              className="mt-4 flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2.5 text-sm font-semibold backdrop-blur transition-colors hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              Generate AI Tasks
-              <ArrowRight className="h-4 w-4" />
+              {aiLoading ? "Please wait" : aiState.ctaLabel}
+              {aiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
             </button>
           </section>
         </div>
@@ -300,9 +346,11 @@ export function Planner() {
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold text-slate-900">{b.title}</p>
                       <p className="text-sm text-slate-500">
+                        {b.deadline_label ? <span className="font-medium text-slate-600">Due {b.deadline_label}</span> : null}
+                        {b.deadline_label && b.subtitle ? <span className="mx-2 text-slate-300">•</span> : null}
                         {b.subtitle}
                         {b.duration_minutes ? (
-                          <span className="ml-2 font-mono text-xs text-slate-400">Â· {b.duration_label || `${b.duration_minutes} min`}</span>
+                          <span className="ml-2 font-mono text-xs text-slate-400">• {b.duration_label || `${b.duration_minutes} min`}</span>
                         ) : null}
                       </p>
                     </div>
@@ -355,3 +403,4 @@ export function Planner() {
     </div>
   );
 }
+

@@ -79,7 +79,7 @@ async def get_user_tasks(user_id: str) -> list[dict]:
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not connected")
-    tasks = await db.tasks.find({"user_id": user_id}).to_list(length=None)
+    tasks = await db.tasks.find({"user_id": user_id, "is_deleted": {"$ne": True}}).to_list(length=None)
     return [_serialize_task(t) for t in tasks]
 
 
@@ -87,7 +87,7 @@ async def get_all_tasks() -> list[dict]:
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not connected")
-    tasks = await db.tasks.find({}).to_list(length=None)
+    tasks = await db.tasks.find({"is_deleted": {"$ne": True}}).to_list(length=None)
     return [_serialize_task(t) for t in tasks]
 
 
@@ -135,5 +135,5 @@ async def delete_task(task_id: str, user_id: str, is_admin: bool) -> dict:
     if not is_admin and task["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="Not allowed to delete this task")
 
-    await db.tasks.delete_one({"_id": task_obj_id})
+    await db.tasks.update_one({"_id": task_obj_id}, {"$set": {"is_deleted": True}})
     return {"message": "Task deleted successfully"}

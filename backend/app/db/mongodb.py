@@ -11,9 +11,11 @@ def get_database() -> AsyncIOMotorDatabase | None:
     return database
 
 
+import certifi
+
 async def connect_to_mongo() -> None:
     global client, database
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncIOMotorClient(settings.mongodb_uri, tlsCAFile=certifi.where())
     database = client[settings.mongodb_db]
 
 

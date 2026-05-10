@@ -1,4 +1,4 @@
-import { Play, Search, SlidersHorizontal, X, Loader2, Trash2 } from "lucide-react";
+import { Play, Search, X, Loader2, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
@@ -11,6 +11,17 @@ const tabs = [
   { key: "in_progress", label: "In Progress" },
   { key: "completed", label: "Completed" },
 ];
+
+const adminLearnerViewCopy = {
+  completed: {
+    title: "Completed Learners",
+    empty: "No learners have completed any course in this view yet.",
+  },
+  in_progress: {
+    title: "In Progress Learners",
+    empty: "No learners are currently in progress in this view.",
+  },
+};
 
 export function Courses() {
   const navigate = useNavigate();
@@ -49,6 +60,26 @@ export function Courses() {
     );
   }, [data, q]);
 
+  const adminLearnerListMode = isAdmin && tab !== "all";
+  const adminLearnerRows = useMemo(() => {
+    if (!adminLearnerListMode) return [];
+    const wantedStatus = tab === "completed" ? "completed" : "in_progress";
+    return filtered.flatMap((course) =>
+      (course.learner_progress || [])
+        .filter((learner) => learner.status === wantedStatus)
+        .map((learner) => ({
+          key: `${course.id}-${learner.user_id}`,
+          full_name: learner.full_name,
+          course_title: course.title,
+          category: course.category,
+          progress_percent: learner.progress_percent,
+          status: learner.status,
+        })),
+    );
+  }, [adminLearnerListMode, filtered, tab]);
+
+  const activeAdminLearnerCopy = tab === "completed" ? adminLearnerViewCopy.completed : adminLearnerViewCopy.in_progress;
+
   async function handleDeleteCourse(courseId) {
     setErr("");
     setDeletingCourseId(courseId);
@@ -71,55 +102,53 @@ export function Courses() {
   }
 
   if (!data) {
-    return (
-      <div className="flex min-h-[50vh] items-center justify-center text-slate-500">Loading courses…</div>
-    );
+    return <div className="flex min-h-[50vh] items-center justify-center text-slate-500">Loading courses...</div>;
   }
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-6 lg:p-10">
       <header className="mb-8 rounded-[28px] border border-slate-100 bg-white/80 p-5 shadow-sm backdrop-blur-sm lg:p-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 className="font-display text-3xl text-slate-900">My Courses</h1>
-          <p className="mt-1 text-sm text-slate-500">{data.summary}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative group lg:w-80">
-            <form onSubmit={(e) => e.preventDefault()} className="relative">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-blue-500 group-hover:text-slate-500" />
-              <input
-                type="text"
-                id="courses-search"
-                name="courses_search"
-                aria-label="Search courses"
-                placeholder="Search courses..."
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                className="w-full min-w-[200px] rounded-full border border-slate-200 bg-white/80 backdrop-blur-sm py-2.5 pl-11 pr-10 text-sm shadow-sm outline-none ring-blue-500/20 transition-all duration-300 hover:bg-white hover:border-slate-300 hover:shadow-md focus:bg-white focus:border-blue-500 focus:ring-4 focus:shadow-md sm:w-72 lg:w-full"
-              />
-              {q && (
-                <button
-                  type="button"
-                  onClick={() => setQ("")}
-                  className="absolute right-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-all hover:bg-slate-200 hover:text-slate-700 hover:scale-105 focus:outline-none opacity-100 scale-100"
-                  title="Clear search"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </form>
+          <div>
+            <h1 className="font-display text-3xl text-slate-900">My Courses</h1>
+            <p className="mt-1 text-sm text-slate-500">{data.summary}</p>
           </div>
-          {isAdmin ? (
-            <button
-              type="button"
-              onClick={() => setIsEnrollModalOpen(true)}
-              className="whitespace-nowrap rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition-all duration-300 hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-blue-600/30"
-            >
-              + Enroll Course
-            </button>
-          ) : null}
-        </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative group lg:w-80">
+              <form onSubmit={(e) => e.preventDefault()} className="relative">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-blue-500 group-hover:text-slate-500" />
+                <input
+                  type="text"
+                  id="courses-search"
+                  name="courses_search"
+                  aria-label="Search courses"
+                  placeholder="Search courses..."
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  className="w-full min-w-[200px] rounded-full border border-slate-200 bg-white/80 py-2.5 pl-11 pr-10 text-sm shadow-sm outline-none ring-blue-500/20 transition-all duration-300 hover:border-slate-300 hover:bg-white hover:shadow-md focus:border-blue-500 focus:bg-white focus:ring-4 focus:shadow-md sm:w-72 lg:w-full"
+                />
+                {q ? (
+                  <button
+                    type="button"
+                    onClick={() => setQ("")}
+                    className="absolute right-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition-all hover:scale-105 hover:bg-slate-200 hover:text-slate-700"
+                    title="Clear search"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                ) : null}
+              </form>
+            </div>
+            {isAdmin ? (
+              <button
+                type="button"
+                onClick={() => setIsEnrollModalOpen(true)}
+                className="whitespace-nowrap rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition-all duration-300 hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-blue-600/30"
+              >
+                + Enroll Course
+              </button>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -141,88 +170,129 @@ export function Courses() {
       </div>
 
       <div className="transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] opacity-100 scale-100 blur-0">
-        <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((c) => {
-          const th = getTheme(c.category_theme);
-          const btn = getTheme(c.cta_theme);
-          return (
-            <article
-              key={c.id}
-              className="flex flex-col overflow-hidden rounded-[24px] border border-slate-100 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-slate-200/60"
-            >
-              <div className="relative aspect-[16/10] overflow-hidden">
-                <img src={c.image_url} alt="" className="h-full w-full object-cover" />
+        {adminLearnerListMode ? (
+          <section className="overflow-hidden rounded-[24px] border border-slate-100 bg-white shadow-sm">
+            <div className="border-b border-slate-100 px-5 py-4">
+              <h2 className="font-display text-xl text-slate-900">{activeAdminLearnerCopy.title}</h2>
+            </div>
+            {adminLearnerRows.length ? (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] text-left text-sm">
+                  <thead className="bg-slate-50">
+                    <tr className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <th className="px-5 py-3">User</th>
+                      <th className="px-5 py-3">Course</th>
+                      <th className="px-5 py-3">Progress</th>
+                      <th className="px-5 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {adminLearnerRows.map((row) => (
+                      <tr key={row.key} className="hover:bg-slate-50/80">
+                        <td className="px-5 py-4">
+                          <p className="font-semibold text-slate-900">{row.full_name}</p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <p className="font-medium text-slate-900">{row.course_title}</p>
+                          <p className="text-xs text-slate-500">{row.category}</p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex min-w-[180px] items-center gap-3">
+                            <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                              <div
+                                className={`h-full rounded-full ${row.status === "completed" ? "bg-emerald-500" : "bg-blue-500"}`}
+                                style={{ width: `${Math.max(0, Math.min(100, row.progress_percent || 0))}%` }}
+                              />
+                            </div>
+                            <span className="text-xs font-medium text-slate-500">{row.progress_percent}%</span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              row.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"
+                            }`}
+                          >
+                            {row.status === "completed" ? "Completed" : "In Progress"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="flex flex-1 flex-col p-5">
-                <div className="mb-3 flex items-start justify-between gap-2">
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${th.soft}`}>{c.category}</span>
-                  {c.hours_remaining_label ? (
-                    <span className="flex items-center gap-1 text-xs font-medium text-slate-500">{c.hours_remaining_label}</span>
-                  ) : null}
-                </div>
-                <h2 className="font-display text-lg leading-snug text-slate-900">{c.title}</h2>
-                <p className="mt-2 text-sm text-slate-500">
-                  {c.author}
-                  {c.certificate_eligible ? " · Certificate" : ""}
-                </p>
-                {isAdmin ? (
-                  <div className="mt-3 space-y-1 text-xs text-slate-500">
-                    <p>
-                      <span className="font-semibold text-emerald-700">{c.learner_completed_count}</span> completed
-                      {c.learner_completed_names?.length ? `: ${c.learner_completed_names.join(", ")}` : ""}
-                    </p>
-                    <p>
-                      <span className="font-semibold text-blue-700">{c.learner_in_progress_count}</span> in progress
-                      {c.learner_in_progress_names?.length ? `: ${c.learner_in_progress_names.join(", ")}` : ""}
-                    </p>
-                  </div>
-                ) : null}
-                <div className="mt-4">
-                  <div className="mb-1 flex justify-between text-xs font-medium text-slate-500">
-                    <span>{isAdmin ? "Learner Status" : "Progress"}</span>
-                    <span>{isAdmin ? c.status.replace("_", " ") : `${c.progress_percent}%`}</span>
-                  </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                    <div className={`h-full rounded-full ${th.bar}`} style={{ width: `${c.progress_percent}%` }} />
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/courses/${c.id}`)}
-                  className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold ${btn.btn}`}
+            ) : (
+              <p className="px-5 py-6 text-sm text-slate-500">{activeAdminLearnerCopy.empty}</p>
+            )}
+          </section>
+        ) : (
+          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+            {filtered.map((c) => {
+              const th = getTheme(c.category_theme);
+              const btn = getTheme(c.cta_theme);
+              return (
+                <article
+                  key={c.id}
+                  className="flex flex-col overflow-hidden rounded-[24px] border border-slate-100 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-slate-200/60"
                 >
-                  <Play className="h-4 w-4 fill-current" />
-                  {c.cta_label}
-                </button>
-                {isAdmin ? (
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteCourse(c.id)}
-                    disabled={deletingCourseId === c.id}
-                    className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 py-2.5 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:opacity-60"
-                  >
-                    {deletingCourseId === c.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                    Delete Course
-                  </button>
-                ) : null}
-              </div>
-            </article>
-          );
-        })}
-      </div>
+                  <div className="relative aspect-[16/10] overflow-hidden">
+                    <img src={c.image_url} alt="" className="h-full w-full object-cover" />
+                  </div>
+                  <div className="flex flex-1 flex-col p-5">
+                    <div className="mb-3 flex items-start justify-between gap-2">
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${th.soft}`}>{c.category}</span>
+                      {c.hours_remaining_label ? (
+                        <span className="flex items-center gap-1 text-xs font-medium text-slate-500">{c.hours_remaining_label}</span>
+                      ) : null}
+                    </div>
+                    <h2 className="font-display text-lg leading-snug text-slate-900">{c.title}</h2>
+                    <p className="mt-2 text-sm text-slate-500">
+                      {c.author}
+                      {c.certificate_eligible ? " - Certificate" : ""}
+                    </p>
+                    <div className="mt-4">
+                      <div className="mb-1 flex justify-between text-xs font-medium text-slate-500">
+                        <span>{isAdmin ? "Learner Status" : "Progress"}</span>
+                        <span>{isAdmin ? c.status.replace("_", " ") : `${c.progress_percent}%`}</span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                        <div className={`h-full rounded-full ${th.bar}`} style={{ width: `${c.progress_percent}%` }} />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/courses/${c.id}`)}
+                      className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold ${btn.btn}`}
+                    >
+                      <Play className="h-4 w-4 fill-current" />
+                      {c.cta_label}
+                    </button>
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteCourse(c.id)}
+                        disabled={deletingCourseId === c.id}
+                        className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 py-2.5 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:opacity-60"
+                      >
+                        {deletingCourseId === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        Delete Course
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
 
-      {filtered.length === 0 && q.trim() !== "" ? (
+        {filtered.length === 0 && q.trim() !== "" ? (
           <div className="mt-16 flex flex-col items-center justify-center text-center">
-            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-slate-50 border border-slate-100 shadow-inner">
-               <Search className="h-8 w-8 text-slate-300" />
+            <div className="flex h-20 w-20 items-center justify-center rounded-full border border-slate-100 bg-slate-50 shadow-inner">
+              <Search className="h-8 w-8 text-slate-300" />
             </div>
             <h3 className="mt-5 text-lg font-display font-semibold text-slate-900">No matching courses</h3>
-            <p className="mt-2 max-w-sm text-sm text-slate-500 leading-relaxed">
-              We couldn't find anything matching "<strong className="text-slate-700">{q}</strong>". Try adjusting your search term or filtering options.
+            <p className="mt-2 max-w-sm text-sm leading-relaxed text-slate-500">
+              We couldn&apos;t find anything matching "<strong className="text-slate-700">{q}</strong>". Try adjusting your search term or filtering options.
             </p>
             <button
               onClick={() => setQ("")}
@@ -238,7 +308,7 @@ export function Courses() {
         <EnrollCourseModal
           isOpen={isEnrollModalOpen}
           onClose={() => setIsEnrollModalOpen(false)}
-          onCourseEnrolled={() => setRefreshPulse(r => r + 1)}
+          onCourseEnrolled={() => setRefreshPulse((r) => r + 1)}
         />
       ) : null}
     </div>

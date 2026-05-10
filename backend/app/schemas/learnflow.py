@@ -61,12 +61,14 @@ class MonthlyBar(BaseModel):
 
 
 class SubjectRow(BaseModel):
+    course_id: str
     name: str
     percent: float
     theme: Literal["blue", "purple", "green", "orange", "teal", "neutral"]
 
 
 class PerformanceRow(BaseModel):
+    course_id: str
     course: str
     last_score: str
     score_tone: Literal["success", "warning", "danger", "neutral", "info"]
@@ -103,6 +105,7 @@ class PlannerBlock(BaseModel):
     time: str
     title: str
     subtitle: str
+    deadline_label: str | None = None
     duration_minutes: int | None = None
     duration_label: str | None = None
     status: Literal["done", "now", "pending", "scheduled"]
@@ -126,6 +129,13 @@ class PlannerBlocksSave(BaseModel):
     blocks: list[PlannerBlock]
 
 
+class CourseLearnerProgress(BaseModel):
+    user_id: str
+    full_name: str
+    status: Literal["completed", "in_progress", "not_started"]
+    progress_percent: float
+
+
 class LearnFlowCourseCard(BaseModel):
     id: str
     title: str
@@ -145,6 +155,7 @@ class LearnFlowCourseCard(BaseModel):
     learner_in_progress_count: int = 0
     learner_completed_names: list[str] = Field(default_factory=list)
     learner_in_progress_names: list[str] = Field(default_factory=list)
+    learner_progress: list[CourseLearnerProgress] = Field(default_factory=list)
 
 
 class LearnFlowCoursesResponse(BaseModel):
