@@ -42,8 +42,13 @@ async def login(request: Request) -> TokenResponse:
 
 
 @router.post("/forgot-password")
-async def forgot_password(payload: ForgotPasswordRequest) -> dict:
-    return await auth_service.forgot_password(payload.email)
+async def forgot_password(request: Request, payload: ForgotPasswordRequest) -> dict:
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if origin:
+        base_url = origin.rstrip("/")
+    else:
+        base_url = "https://learnflow-backend-4hab.onrender.com"
+    return await auth_service.forgot_password(payload.email, base_url)
 
 
 @router.post("/reset-password")

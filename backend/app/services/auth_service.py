@@ -77,13 +77,13 @@ async def login(payload: LoginRequest) -> TokenResponse:
     return TokenResponse(access_token=token)
 
 
-def _send_reset_email(to_email: str, token: str):
+def _send_reset_email(to_email: str, token: str, base_url: str = "http://localhost:5173"):
     server = settings.smtp_server
     port = settings.smtp_port or 587
     username = settings.smtp_username
     password = settings.smtp_password
 
-    link = f"http://localhost:5173/reset-password?token={token}"
+    link = f"{base_url}/reset-password?token={token}"
     msg_body = f"Hello,\n\nPlease click the following link to reset your password:\n{link}\n\nThis link will expire in 1 hour.\nIf you did not request this, please ignore this email."
 
     msg = MIMEText(msg_body)
@@ -109,7 +109,7 @@ def _send_reset_email(to_email: str, token: str):
         print(f"Error sending email: {e}")
 
 
-async def forgot_password(email: str) -> dict:
+async def forgot_password(email: str, base_url: str = "http://localhost:5173") -> dict:
     db = get_database()
     if db is None:
         raise HTTPException(status_code=500, detail="Database not connected")
@@ -128,7 +128,7 @@ async def forgot_password(email: str) -> dict:
         "created_at": datetime.now(timezone.utc)
     })
     
-    await asyncio.to_thread(_send_reset_email, email.lower(), token)
+    await asyncio.to_thread(_send_reset_email, email.lower(), token, base_url)
     return {"message": "If an account with that email exists, we have sent a password reset link."}
 
 
